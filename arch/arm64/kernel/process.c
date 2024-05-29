@@ -79,6 +79,16 @@ void arch_cpu_idle(void)
 	local_irq_enable();
 }
 
+void arch_cpu_idle_enter(void)
+{
+	idle_notifier_call_chain(IDLE_START);
+}
+
+void arch_cpu_idle_exit(void)
+{
+	idle_notifier_call_chain(IDLE_END);
+}
+
 #ifdef CONFIG_HOTPLUG_CPU
 void arch_cpu_idle_dead(void)
 {
@@ -203,18 +213,12 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 {
 	mm_segment_t fs;
-	unsigned int i;
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 	show_data(regs->pc - nbytes, nbytes * 2, "PC");
 	show_data(regs->regs[30] - nbytes, nbytes * 2, "LR");
 	show_data(regs->sp - nbytes, nbytes * 2, "SP");
-	for (i = 0; i < 30; i++) {
-		char name[4];
-		snprintf(name, sizeof(name), "X%u", i);
-		show_data(regs->regs[i] - nbytes, nbytes * 2, name);
-	}
 	set_fs(fs);
 }
 
@@ -245,7 +249,7 @@ void __show_regs(struct pt_regs *regs)
 			printk("\n");
 	}
 	if (!user_mode(regs))
-		show_extra_register_data(regs, 128);
+		show_extra_register_data(regs, 256);
 	printk("\n");
 }
 
@@ -353,25 +357,18 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 static void tls_thread_switch(struct task_struct *next)
 {
-	unsigned long tpidr, tpidrro;
-
 	if (!is_compat_task()) {
+		unsigned long tpidr;
 		asm("mrs %0, tpidr_el0" : "=r" (tpidr));
 		current->thread.tp_value = tpidr;
 	}
 
-	if (is_compat_thread(task_thread_info(next))) {
-		tpidr = 0;
-		tpidrro = next->thread.tp_value;
-	} else {
-		tpidr = next->thread.tp_value;
-		tpidrro = 0;
-	}
+	if (is_compat_thread(task_thread_info(next)))
+		write_sysreg(next->thread.tp_value, tpidrro_el0);
+	else if (!arm64_kernel_unmapped_at_el0())
+		write_sysreg(0, tpidrro_el0);
 
-	asm(
-	"	msr	tpidr_el0, %0\n"
-	"	msr	tpidrro_el0, %1"
-	: : "r" (tpidr), "r" (tpidrro));
+	write_sysreg(next->thread.tp_value, tpidr_el0);
 }
 
 /* Restore the UAO state depending on next's addr_limit */

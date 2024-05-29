@@ -127,11 +127,17 @@ ENDPROC(cpu_do_resume)
  *	- pgd_phys - physical address of new TTB
  */
 ENTRY(cpu_do_switch_mm)
+	mrs	x2, ttbr1_el1
 	mmid	x1, x1				// get mm->context.id
-	bfi	x0, x1, #48, #16		// set the ASID
-	msr	ttbr0_el1, x0			// set TTBR0
+#ifdef CONFIG_ARM64_SW_TTBR0_PAN
+	bfi	x0, x1, #48, #16		// set the ASID field in TTBR0
+#endif
+	bfi	x2, x1, #48, #16		// set the ASID
+	msr	ttbr1_el1, x2			// in TTBR1 (since TCR.A1 is set)
 	isb
-	ret
+	msr	ttbr0_el1, x0			// now update TTBR0
+	isb
+	b	post_ttbr_update_workaround	// Back to C code...
 ENDPROC(cpu_do_switch_mm)
 
 	.section ".text.init", #alloc, #execinstr
@@ -182,7 +188,7 @@ ENTRY(__cpu_setup)
 	 * both user and kernel.
 	 */
 	ldr	x10, =TCR_TxSZ(VA_BITS) | TCR_CACHE_FLAGS | TCR_SMP_FLAGS | \
-			TCR_TG_FLAGS | TCR_ASID16 | TCR_TBI0
+			TCR_TG_FLAGS | TCR_ASID16 | TCR_TBI0 | TCR_A1
 	tcr_set_idmap_t0sz	x10, x9
 
 	/*
@@ -205,5 +211,18 @@ ENDPROC(__cpu_setup)
 	 */
 	.type	crval, #object
 crval:
-	.word	0x000802e2			// clear
-	.word	0x0405d11d			// set
+
+#ifdef CONFIG_ARM64_ICACHE_DISABLE
+#define CR_IBIT		0
+#else
+#define CR_IBIT		0x1000
+#endif
+
+#ifdef CONFIG_ARM64_DCACHE_DISABLE
+#define CR_CBIT		0
+#else
+#define CR_CBIT		0x4
+#endif
+
+	.word	0x000802c2	// clear
+	.word	0x0405c039 | CR_IBIT | CR_CBIT	// set
