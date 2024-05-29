@@ -25,6 +25,7 @@
 #include <linux/mount.h>
 #include <linux/personality.h>
 #include <linux/backing-dev.h>
+#include <linux/pfk.h>
 #include <net/flow.h>
 
 #define MAX_LSM_EVM_XATTR	2
@@ -508,6 +509,16 @@ int security_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode
 }
 EXPORT_SYMBOL_GPL(security_inode_create);
 
+int security_inode_post_create(struct inode *dir, struct dentry *dentry,
+			       umode_t mode)
+{
+	if (unlikely(IS_PRIVATE(dir)))
+		return 0;
+	if (security_ops->inode_post_create == NULL)
+		return 0;
+	return security_ops->inode_post_create(dir, dentry, mode);
+}
+
 int security_inode_link(struct dentry *old_dentry, struct inode *dir,
 			 struct dentry *new_dentry)
 {
@@ -821,6 +832,16 @@ int security_file_open(struct file *file, const struct cred *cred)
 		return ret;
 
 	return fsnotify_perm(file, MAY_OPEN);
+}
+
+bool security_allow_merge_bio(struct bio *bio1, struct bio *bio2)
+{
+	bool ret = pfk_allow_merge_bio(bio1, bio2);
+
+	if (security_ops->allow_merge_bio)
+		ret = ret && security_ops->allow_merge_bio(bio1, bio2);
+
+	return ret;
 }
 
 int security_task_create(unsigned long clone_flags)
