@@ -37,6 +37,14 @@ ssize_t led_trigger_store(struct device *dev, struct device_attribute *attr,
 	char trigger_name[TRIG_NAME_MAX];
 	struct led_trigger *trig;
 	size_t len;
+	int ret = count;
+
+	mutex_lock(&led_cdev->led_access);
+
+	if (led_sysfs_is_disabled(led_cdev)) {
+		ret = -EBUSY;
+		goto unlock;
+	}
 
 	trigger_name[sizeof(trigger_name) - 1] = '\0';
 	strncpy(trigger_name, buf, sizeof(trigger_name) - 1);
@@ -47,7 +55,7 @@ ssize_t led_trigger_store(struct device *dev, struct device_attribute *attr,
 
 	if (!strcmp(trigger_name, "none")) {
 		led_trigger_remove(led_cdev);
-		return count;
+		goto unlock;
 	}
 
 	down_read(&triggers_list_lock);
@@ -58,12 +66,14 @@ ssize_t led_trigger_store(struct device *dev, struct device_attribute *attr,
 			up_write(&led_cdev->trigger_lock);
 
 			up_read(&triggers_list_lock);
-			return count;
+			goto unlock;
 		}
 	}
 	up_read(&triggers_list_lock);
 
-	return -EINVAL;
+unlock:
+	mutex_unlock(&led_cdev->led_access);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(led_trigger_store);
 
@@ -177,6 +187,7 @@ void led_trigger_rename_static(const char *name, struct led_trigger *trig)
 	up_write(&triggers_list_lock);
 }
 EXPORT_SYMBOL_GPL(led_trigger_rename_static);
+
 
 /* LED Trigger Interface */
 
@@ -295,6 +306,22 @@ void led_trigger_blink_oneshot(struct led_trigger *trig,
 }
 EXPORT_SYMBOL_GPL(led_trigger_blink_oneshot);
 
+/*huaqin modify by likai for flash at 2018/2/13 start*/
+struct led_trigger * led_trigger_get(const char *name)
+{
+    struct led_trigger *_trig;
+    down_write(&triggers_list_lock);
+    /* Make sure the trigger's name isn't already in use */
+    list_for_each_entry(_trig, &trigger_list, next_trig) {
+        if (!strcmp(_trig->name, name)) {
+            up_write(&triggers_list_lock);
+            return _trig;
+        }
+    }
+    up_write(&triggers_list_lock);
+    return NULL;
+}
+/*huaqin modify by likai for flash at 2018/2/13 end*/
 void led_trigger_register_simple(const char *name, struct led_trigger **tp)
 {
 	struct led_trigger *trig;
@@ -315,6 +342,11 @@ void led_trigger_register_simple(const char *name, struct led_trigger **tp)
 		pr_warn("LED trigger %s failed to register (no memory)\n",
 			name);
 	}
+/*huaqin modify by likai for flash at 2018/2/13 start*/
+if(!strcmp("switch_trigger", name) && trig == NULL){
+        trig = led_trigger_get(name);
+    }
+/*huaqin modify by likai for flash at 2018/2/13 end*/
 	*tp = trig;
 }
 EXPORT_SYMBOL_GPL(led_trigger_register_simple);

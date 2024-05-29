@@ -54,6 +54,7 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 	struct gpio_led_data *led_dat =
 		container_of(led_cdev, struct gpio_led_data, cdev);
 	int level;
+	int ret = 0;
 
 	if (value == LED_OFF)
 		level = 0;
@@ -67,6 +68,7 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 	 * seem to have a reliable way to know if we're already in one; so
 	 * let's just assume the worst.
 	 */
+
 	if (led_dat->can_sleep) {
 		led_dat->new_level = level;
 		schedule_work(&led_dat->work);
@@ -77,6 +79,9 @@ static void gpio_led_set(struct led_classdev *led_cdev,
 			led_dat->blinking = 0;
 		} else
 			gpio_set_value(led_dat->gpio, level);
+
+		ret = gpio_get_value(led_dat->gpio);
+		pr_err("set level = %d \n", ret);
 	}
 }
 
@@ -101,7 +106,7 @@ static int create_gpio_led(const struct gpio_led *template,
 
 	/* skip leds that aren't available */
 	if (!gpio_is_valid(template->gpio)) {
-		dev_info(parent, "Skipping unavailable LED gpio %d (%s)\n",
+		dev_err(parent, "Skipping unavailable LED gpio %d (%s)\n",
 				template->gpio, template->name);
 		return 0;
 	}
